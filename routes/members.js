@@ -5,12 +5,12 @@ const connectDB = require("../db");
 const router = express.Router();
 
 // Get all members for a book
-router.get("/members", async (req, res) => {
+router.get("/:bookName/members", async (req, res) => {
   const { bookName } = req.params;
   try {
     const db = await connectDB();
     const members = await db
-      .collection(`members`)
+      .collection(`${bookName}_members`)
       .find()
       .sort({ createdAt: -1 })
       .toArray();
@@ -22,7 +22,7 @@ router.get("/members", async (req, res) => {
 });
 
 // Add a new member
-router.post("/members", async (req, res) => {
+router.post("/:bookName/members", async (req, res) => {
   const { bookName } = req.params;
   const member = {
     ...req.body,
@@ -31,7 +31,7 @@ router.post("/members", async (req, res) => {
 
   try {
     const db = await connectDB();
-    const result = await db.collection(`members`).insertOne(member);
+    const result = await db.collection(`${bookName}_members`).insertOne(member);
     res.json({ insertedId: result.insertedId });
   } catch (err) {
     console.error(err);
@@ -40,13 +40,14 @@ router.post("/members", async (req, res) => {
 });
 
 // Update a member
-router.put("/members/:id", async (req, res) => {
+router.put("/:bookName/members/:id", async (req, res) => {
   const { bookName, id } = req.params;
   try {
     const db = await connectDB();
-    const result = await db
-      .collection(`members`)
-      .updateOne({ _id: new ObjectId(id) }, { $set: req.body });
+    const result = await db.collection(`${bookName}_members`).updateOne(
+      { _id: new ObjectId(id) },
+      { $set: req.body }
+    );
     res.json({ modifiedCount: result.modifiedCount });
   } catch (err) {
     console.error(err);
@@ -55,12 +56,12 @@ router.put("/members/:id", async (req, res) => {
 });
 
 // Delete a member
-router.delete("/members/:id", async (req, res) => {
+router.delete("/:bookName/members/:id", async (req, res) => {
   const { bookName, id } = req.params;
   try {
     const db = await connectDB();
     const result = await db
-      .collection(`members`)
+      .collection(`${bookName}_members`)
       .deleteOne({ _id: new ObjectId(id) });
     res.json({ deletedCount: result.deletedCount });
   } catch (err) {
@@ -68,5 +69,21 @@ router.delete("/members/:id", async (req, res) => {
     res.status(500).json({ message: "Failed to delete member" });
   }
 });
+router.patch("/bookName/members/:id", async (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+
+  try {
+    const db = await connectDB();
+    await db
+      .collection(`${bookName}_members`)
+      .updateOne({ _id: new ObjectId(id) }, { $set: updates });
+    res.json({ success: true, message: "Installments updated" });
+  } catch (err) {
+    console.error("Update failed:", err);
+    res.status(500).json({ success: false, message: "Update error" });
+  }
+});
+
 
 module.exports = router;
