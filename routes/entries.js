@@ -1,12 +1,11 @@
+// POST: Add entry to bookName collection
 const express = require("express");
 const { ObjectId } = require("mongodb");
-const connectDB = require("../db");
+const connectDB = require("../db"); // Adjust path as needed
 const router = express.Router();
 
-// POST: Add entry to bookName collection
-router.post("/:bookName/entries", async (req, res) => {
-  const { bookName } = req.params;
-  console.log("Adding entry to:", bookName);
+// Add global entry (for dashboard use)
+router.post("/entries", async (req, res) => {
   try {
     const db = await connectDB();
     const {
@@ -23,8 +22,8 @@ router.post("/:bookName/entries", async (req, res) => {
     } = req.body;
 
     const entry = {
-      date,
-      time,
+      date: date || new Date().toISOString().slice(0, 10),
+      time: time || new Date().toISOString().slice(11, 16),
       amount: parseFloat(amount),
       contact,
       remarks,
@@ -34,14 +33,15 @@ router.post("/:bookName/entries", async (req, res) => {
       type,
       createdAt: createdAt ? new Date(createdAt) : new Date(),
     };
-
-    const result = await db.collection(`${bookName}_entries`).insertOne(entry);
-    res.status(201).json(result);
+    // console.log("Adding entry:", entry);
+    const result = await db.collection("entries").insertOne(entry);
+    res.status(201).json({ success: true, data: result.ops?.[0] || entry });
   } catch (err) {
     console.error("Entry add error:", err);
-    res.status(500).json({ message: "Failed to add entry" });
+    res.status(500).json({ success: false, message: "Failed to add entry" });
   }
 });
+
 
 // GET: Fetch all entries from a bookName collection
 router.get("/:bookName/entries", async (req, res) => {
@@ -64,23 +64,75 @@ router.get("/:bookName/entries", async (req, res) => {
 
 
 // GET: Fetch single entry by ID from bookName collection
-router.get("/:bookName/entries/:id", async (req, res) => {
-  const { bookName, id } = req.params;
+// GET /entries
+router.get("/entries", async (req, res) => {
   try {
     const db = await connectDB();
-    const entry = await db
-      .collection(`${bookName}_entries`)
-      .findOne({ _id: new ObjectId(id) });
+    const entries = await db
+      .collection("entries")
+      .find()
+      .sort({ createdAt: -1 })
+      .toArray();
 
-    if (!entry) {
-      return res.status(404).json({ message: "Entry not found" });
-    }
-
-    res.json(entry);
+    res.json({ success: true, entries });
   } catch (err) {
-    console.error("Error fetching entry:", err);
-    res.status(500).json({ message: "Failed to fetch entry" });
+    console.error("Failed to fetch entries:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch entries" });
   }
 });
+router.patch("/entries/:id", async (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+
+  try {
+    const db = await connectDB();
+    await db
+      .collection("entries")
+      .updateOne({ _id: new ObjectId(id) }, { $set: updates });
+
+    res.json({ success: true, message: "Entry updated" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Update error" });
+  }
+});
+router.delete("/entries/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const db = await connectDB();
+    await db.collection("entries").deleteOne({ _id: new ObjectId(id) });
+    res.json({ success: true, message: "Entry deleted" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Delete error" });
+  }
+});
+
+// specific quuery based on category
+router.get("/entries", async (req, res) => {
+  try {
+    const db = await connectDB();
+    const { category } = req.query;
+
+    const query = {};
+    if (category) {
+      query.category = category; // filter by category if provided
+    }
+
+    const entries = await db
+      .collection("entries")
+      .find(query)
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json({ success: true, entries });
+  } catch (err) {
+    console.error("Failed to fetch entries:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch entries" });
+  }
+});
+
+
 
 module.exports = router;
