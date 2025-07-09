@@ -70,28 +70,36 @@ router.delete("/members/:id", async (req, res) => {
     res.status(500).json({ message: "Failed to delete member" });
   }
 });
+// PATCH /members/:id
 router.patch("/members/:id", async (req, res) => {
-  const { id } = req.params;
-  const updates = { ...req.body };
-
   try {
     const db = await connectDB();
+    const memberId = req.params.id;
+    const updateData = req.body;
 
-    // ✅ Remove _id if exists in update payload
-    if ("_id" in updates) {
-      delete updates._id;
-    }
+    // Dynamically calculate total of payment1Amount + payment2Amount + ...
+    // Dynamically calculate total of all paymentXAmount fields
+let total = 0;
+for (const key in updateData) {
+  if (key.startsWith("payment") && key.endsWith("Amount")) {
+    total += Number(updateData[key]) || 0;
+  }
+}
+updateData.installmentTotal = total;
 
-    await db
-      .collection("members")
-      .updateOne({ _id: new ObjectId(id) }, { $set: updates });
 
-    res.json({ success: true, message: "Member updated" });
-  } catch (err) {
-    console.error("Update failed:", err);
-    res.status(500).json({ success: false, message: "Update error" });
+    await db.collection("members").updateOne(
+      { _id: new ObjectId(memberId) },
+      { $set: updateData }
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error updating member:", error);
+    res.status(500).json({ success: false, message: "Update failed" });
   }
 });
+
 
 
 

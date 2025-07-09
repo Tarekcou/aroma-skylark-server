@@ -14,11 +14,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.use("/api/books", bookRoutes);
-// app.use("/api/booksDetails", bookDetails);
 
-app.use("/api", categories);
-app.use("/api", fields);
 app.use("/api", entries);
 app.use("/api", members);
 

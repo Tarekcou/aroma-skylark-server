@@ -108,19 +108,14 @@ router.delete("/entries/:id", async (req, res) => {
 });
 
 // specific quuery based on category
-router.get("/entries", async (req, res) => {
+router.get("/entries/category/:categoryName", async (req, res) => {
   try {
     const db = await connectDB();
-    const { category } = req.query;
-
-    const query = {};
-    if (category) {
-      query.category = category; // filter by category if provided
-    }
+    const { categoryName } = req.params;
 
     const entries = await db
       .collection("entries")
-      .find(query)
+      .find({ category: categoryName })
       .sort({ createdAt: -1 })
       .toArray();
 
