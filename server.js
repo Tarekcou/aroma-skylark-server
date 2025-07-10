@@ -2,11 +2,8 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
-const bookRoutes = require("./routes/books");
-const bookDetails = require("./routes/booksDetails");
 const entries = require("./routes/entries");
-const fields = require("./routes/fields");
-const categories = require("./routes/categories");
+
 const members = require("./routes/members");
 
 const app = express();
