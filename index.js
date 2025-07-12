@@ -2,10 +2,10 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
-const entries = require("./routes/entries");
+const entries = require("./api/entries");
 
-const members = require("./routes/members");
-const products = require("./routes/products");
+const members = require("./api/members");
+const products = require("./api/products");
 
 const app = express();
 
