@@ -5,6 +5,7 @@ require("dotenv").config();
 const entries = require("./routes/entries");
 
 const members = require("./routes/members");
+const products = require("./routes/products");
 
 const app = express();
 
@@ -14,6 +15,7 @@ app.use(express.json());
 
 app.use("/api", entries);
 app.use("/api", members);
+app.use("/api", products);
 
 
 const PORT = process.env.PORT || 5005;
