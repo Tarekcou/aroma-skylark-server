@@ -6,13 +6,69 @@ const connectDB = require("../db");
 const router = express.Router();
 let productsCollection;
 
-// ensure app.js has: app.use(express.json());
+// IMPORTANT in your main app.js/server.js:
+//  app.use(express.json());
+
 connectDB()
   .then((db) => {
     productsCollection = db.collection("products");
     console.log("✅ Products collection ready");
   })
   .catch((err) => console.error(err));
+
+// ---------- Helpers ----------
+function effectFromLog(log) {
+  const qty = Number(log.quantity) || 0;
+  if (log.type === "in")
+    return { stockDelta: +qty, inDelta: +qty, outDelta: 0 };
+  if (log.type === "out")
+    return { stockDelta: -qty, inDelta: 0, outDelta: +qty };
+  return { stockDelta: 0, inDelta: 0, outDelta: 0 };
+}
+
+/**
+ * Recompute:
+ * - per-log balance (running stock after each transaction)
+ * - product totals (stock, totalIn, totalOut)
+ * Validates that balance never goes negative.
+ * Returns { logs: recomputedLogs, stock, totalIn, totalOut }
+ */
+function recomputeFromLogs(rawLogs) {
+  let stock = 0;
+  let totalIn = 0;
+  let totalOut = 0;
+
+  const logs = (rawLogs || []).map((l) => ({
+    date: l.date, // "YYYY-MM-DD"
+    type: l.type, // "in"|"out"
+    quantity: Number(l.quantity),
+    remarks: l.remarks || "",
+    // keep any unknown fields out
+  }));
+
+  const recomputed = [];
+  for (const log of logs) {
+    const eff = effectFromLog(log);
+    const nextStock = stock + eff.stockDelta;
+    if (nextStock < 0) {
+      const info = `${log.type} ${log.quantity} on ${log.date}`;
+      const err = new Error(
+        `Insufficient stock; balance would go negative at "${info}"`
+      );
+      err.code = "NEGATIVE_STOCK";
+      throw err;
+    }
+    stock = nextStock;
+    totalIn += eff.inDelta;
+    totalOut += eff.outDelta;
+
+    recomputed.push({ ...log, balance: stock });
+  }
+
+  return { logs: recomputed, stock, totalIn, totalOut };
+}
+
+// ---------- Routes ----------
 
 // Create product
 router.post("/products", async (req, res) => {
@@ -40,7 +96,7 @@ router.post("/products", async (req, res) => {
 });
 
 // Get all products (summary)
-router.get("/products", async (req, res) => {
+router.get("/products", async (_req, res) => {
   try {
     const products = await productsCollection
       .find({})
@@ -51,6 +107,7 @@ router.get("/products", async (req, res) => {
         stock: 1,
         totalIn: 1,
         totalOut: 1,
+        createdAt: 1,
       })
       .toArray();
     res.json(products);
@@ -70,13 +127,12 @@ router.get("/products/:id", async (req, res) => {
     const product = await productsCollection.findOne({ _id: new ObjectId(id) });
     if (!product) return res.status(404).json({ error: "Product not found" });
 
+    // logs already have balance stored; we can filter subset for display
     let logs = product.logs || [];
-
     if (from || to) {
       const fromDate = from ? new Date(from) : new Date("1970-01-01");
       const toDate = to ? new Date(to) : new Date("9999-12-31");
       logs = logs.filter((log) => {
-        // log.date is YYYY-MM-DD; compare using Date
         const logDate = log.date ? new Date(log.date) : null;
         return logDate && logDate >= fromDate && logDate <= toDate;
       });
@@ -134,19 +190,7 @@ router.delete("/products/:id", async (req, res) => {
   }
 });
 
-// Helper to apply/remap stock/totals based on a log
-function effectFromLog(log) {
-  const qty = Number(log.quantity) || 0;
-  if (log.type === "in") {
-    return { stockDelta: +qty, inDelta: +qty, outDelta: 0 };
-  }
-  if (log.type === "out") {
-    return { stockDelta: -qty, inDelta: 0, outDelta: +qty };
-  }
-  return { stockDelta: 0, inDelta: 0, outDelta: 0 };
-}
-
-// Add log (uses index-less logs; edit/delete by index)
+// Add log (append; compute/stash balance; recompute totals)
 router.post("/products/:id/logs", async (req, res) => {
   try {
     const { id } = req.params;
@@ -161,36 +205,49 @@ router.post("/products/:id/logs", async (req, res) => {
         .status(400)
         .json({ error: "quantity must be positive number" });
 
-    // normalize date to YYYY-MM-DD
-    const logDate = date ? new Date(date) : new Date();
-    const yyyyMmDd = logDate.toISOString().slice(0, 10);
+    const yyyyMmDd = (date ? new Date(date) : new Date())
+      .toISOString()
+      .slice(0, 10);
 
-    const log = { date: yyyyMmDd, type, quantity: qty, remarks };
+    const product = await productsCollection.findOne({ _id: new ObjectId(id) });
+    if (!product) return res.status(404).json({ error: "Product not found" });
 
-    const eff = effectFromLog(log);
+    const newLogs = [
+      ...(product.logs || []),
+      { date: yyyyMmDd, type, quantity: qty, remarks },
+    ];
 
-    const result = await productsCollection.updateOne(
+    // Recompute & validate (no negative balance)
+    let recomputed;
+    try {
+      recomputed = recomputeFromLogs(newLogs);
+    } catch (e) {
+      if (e.code === "NEGATIVE_STOCK")
+        return res.status(400).json({ error: e.message });
+      throw e;
+    }
+
+    await productsCollection.updateOne(
       { _id: new ObjectId(id) },
       {
-        $push: { logs: log },
-        $inc: {
-          stock: eff.stockDelta,
-          totalIn: eff.inDelta,
-          totalOut: eff.outDelta,
+        $set: {
+          logs: recomputed.logs,
+          stock: recomputed.stock,
+          totalIn: recomputed.totalIn,
+          totalOut: recomputed.totalOut,
         },
       }
     );
 
-    if (!result.matchedCount)
-      return res.status(404).json({ error: "Product not found" });
-    res.status(201).json(log);
+    // Return the newly added log (with balance) for convenience
+    res.status(201).json(recomputed.logs[recomputed.logs.length - 1]);
   } catch (err) {
     console.error("Error adding log:", err);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-// Update a log by index
+// Update a log by index (recompute balances & totals)
 router.patch("/products/:id/logs/:index", async (req, res) => {
   try {
     const { id, index } = req.params;
@@ -205,12 +262,11 @@ router.patch("/products/:id/logs/:index", async (req, res) => {
     if (!oldLog)
       return res.status(400).json({ error: "Log not found at index" });
 
-    // Build new log
-    const newLog = {
+    const updated = {
       date: req.body.date
         ? new Date(req.body.date).toISOString().slice(0, 10)
         : oldLog.date,
-      type: req.body.type || oldLog.type,
+      type: req.body.type ?? oldLog.type,
       quantity:
         req.body.quantity != null
           ? Number(req.body.quantity)
@@ -219,27 +275,39 @@ router.patch("/products/:id/logs/:index", async (req, res) => {
         req.body.remarks != null ? req.body.remarks : oldLog.remarks || "",
     };
 
-    if (newLog.type !== "in" && newLog.type !== "out")
+    if (updated.type !== "in" && updated.type !== "out")
       return res.status(400).json({ error: "type must be 'in' or 'out'" });
-    if (!Number.isFinite(newLog.quantity) || newLog.quantity <= 0)
+    if (!Number.isFinite(updated.quantity) || updated.quantity <= 0)
       return res
         .status(400)
         .json({ error: "quantity must be positive number" });
 
-    // Compute deltas: remove old effect, add new effect
-    const oldEff = effectFromLog(oldLog);
-    const newEff = effectFromLog(newLog);
+    const newLogs = [...(product.logs || [])];
+    newLogs[idx] = {
+      date: updated.date,
+      type: updated.type,
+      quantity: updated.quantity,
+      remarks: updated.remarks,
+    };
 
-    product.logs[idx] = newLog;
+    // Recompute & validate
+    let recomputed;
+    try {
+      recomputed = recomputeFromLogs(newLogs);
+    } catch (e) {
+      if (e.code === "NEGATIVE_STOCK")
+        return res.status(400).json({ error: e.message });
+      throw e;
+    }
 
-    const result = await productsCollection.updateOne(
+    await productsCollection.updateOne(
       { _id: new ObjectId(id) },
       {
-        $set: { logs: product.logs },
-        $inc: {
-          stock: -oldEff.stockDelta + newEff.stockDelta,
-          totalIn: -oldEff.inDelta + newEff.inDelta,
-          totalOut: -oldEff.outDelta + newEff.outDelta,
+        $set: {
+          logs: recomputed.logs,
+          stock: recomputed.stock,
+          totalIn: recomputed.totalIn,
+          totalOut: recomputed.totalOut,
         },
       }
     );
@@ -251,7 +319,7 @@ router.patch("/products/:id/logs/:index", async (req, res) => {
   }
 });
 
-// Delete a log by index
+// Delete a log by index (recompute balances & totals)
 router.delete("/products/:id/logs/:index", async (req, res) => {
   try {
     const { id, index } = req.params;
@@ -262,20 +330,23 @@ router.delete("/products/:id/logs/:index", async (req, res) => {
     const product = await productsCollection.findOne({ _id: new ObjectId(id) });
     if (!product) return res.status(404).json({ error: "Product not found" });
 
-    const log = (product.logs || [])[idx];
-    if (!log) return res.status(400).json({ error: "Log not found at index" });
+    const logs = [...(product.logs || [])];
+    if (!logs[idx])
+      return res.status(400).json({ error: "Log not found at index" });
 
-    const eff = effectFromLog(log);
-    product.logs.splice(idx, 1);
+    logs.splice(idx, 1);
 
-    const result = await productsCollection.updateOne(
+    // Recompute (deleting cannot create negative balance, but we keep the same flow)
+    const recomputed = recomputeFromLogs(logs);
+
+    await productsCollection.updateOne(
       { _id: new ObjectId(id) },
       {
-        $set: { logs: product.logs },
-        $inc: {
-          stock: -eff.stockDelta,
-          totalIn: -eff.inDelta,
-          totalOut: -eff.outDelta,
+        $set: {
+          logs: recomputed.logs,
+          stock: recomputed.stock,
+          totalIn: recomputed.totalIn,
+          totalOut: recomputed.totalOut,
         },
       }
     );
