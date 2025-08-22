@@ -99,6 +99,34 @@ updateData.installmentTotal = total;
     res.status(500).json({ success: false, message: "Update failed" });
   }
 });
+router.patch("/members/:id/update-total", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, transactionType } = req.body;
+
+    const member = await membersCollection.findOne({ _id: new ObjectId(id) });
+    if (!member) {
+      return res.status(404).json({ message: "Member not found" });
+    }
+
+    let newTotal = member.total || 0;
+    if (transactionType === "cash-in") {
+      newTotal += amount;
+    } else if (transactionType === "cash-out") {
+      newTotal -= amount;
+    }
+
+    const result = await membersCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { total: newTotal } }
+    );
+
+    res.json({ modifiedCount: result.modifiedCount, newTotal });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 
 

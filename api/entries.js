@@ -19,6 +19,8 @@ router.post("/entries", async (req, res) => {
       division,
       type,
       createdAt,
+      balance,
+      details
     } = req.body;
 
     const entry = {
@@ -31,6 +33,8 @@ router.post("/entries", async (req, res) => {
       mode,
       division,
       type,
+      balance,
+      details,
       createdAt: createdAt ? new Date(createdAt) : new Date(),
     };
     // console.log("Adding entry:", entry);
