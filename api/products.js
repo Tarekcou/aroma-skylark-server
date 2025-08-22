@@ -156,26 +156,33 @@ router.get("/products/:id", async (req, res) => {
 });
 
 // Update product meta (name/unit/remarks)
+// Update product
 router.patch("/products/:id", async (req, res) => {
   try {
+    const { id } = req.params;
     const { name, unit, remarks } = req.body;
-    const update = {};
-    if (name !== undefined) update.name = name;
-    if (unit !== undefined) update.unit = unit;
-    if (remarks !== undefined) update.remarks = remarks;
+
+    const updateDoc = {};
+    if (name) updateDoc.name = name;
+    if (unit) updateDoc.unit = unit;
+    // if (remarks !== undefined) updateDoc.remarks = remarks;
 
     const result = await productsCollection.updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $set: update }
+      { _id: new ObjectId(id) },
+      { $set: updateDoc }
     );
-    if (!result.matchedCount)
+
+    if (result.matchedCount === 0) {
       return res.status(404).json({ error: "Product not found" });
-    res.json({ ok: true });
+    }
+
+    res.json({ ok: true, updatedCount: result.modifiedCount });
   } catch (err) {
     console.error("Error updating product:", err);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
 
 // Delete product
 router.delete("/products/:id", async (req, res) => {
