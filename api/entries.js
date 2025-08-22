@@ -16,7 +16,7 @@ router.post("/entries", async (req, res) => {
       remarks,
       category,
       mode,
-      extraField,
+      division,
       type,
       createdAt,
     } = req.body;
@@ -29,7 +29,7 @@ router.post("/entries", async (req, res) => {
       remarks,
       category,
       mode,
-      extraField,
+      division,
       type,
       createdAt: createdAt ? new Date(createdAt) : new Date(),
     };
