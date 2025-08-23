@@ -75,23 +75,24 @@ router.patch("/members/:id", async (req, res) => {
   try {
     const db = await connectDB();
     const memberId = req.params.id;
-    const updateData = req.body;
+    const { unset, ...updateData } = req.body;
 
-    // Dynamically calculate total of payment1Amount + payment2Amount + ...
-    // Dynamically calculate total of all paymentXAmount fields
-let total = 0;
-for (const key in updateData) {
-  if (key.startsWith("payment") && key.endsWith("Amount")) {
-    total += Number(updateData[key]) || 0;
-  }
-}
-updateData.installmentTotal = total;
+    // Calculate total only from fields that exist
+    let total = 0;
+    for (const key in updateData) {
+      if (key.startsWith("payment") && key.endsWith("Amount")) {
+        total += Number(updateData[key]) || 0;
+      }
+    }
+    updateData.installmentTotal = total;
 
+    const updateQuery = {};
+    if (Object.keys(updateData).length) updateQuery.$set = updateData;
+    if (unset && Object.keys(unset).length) updateQuery.$unset = unset;
 
-    await db.collection("members").updateOne(
-      { _id: new ObjectId(memberId) },
-      { $set: updateData }
-    );
+    await db
+      .collection("members")
+      .updateOne({ _id: new ObjectId(memberId) }, updateQuery);
 
     res.json({ success: true });
   } catch (error) {
@@ -99,6 +100,7 @@ updateData.installmentTotal = total;
     res.status(500).json({ success: false, message: "Update failed" });
   }
 });
+
 router.patch("/members/:id/update-total", async (req, res) => {
   try {
     const { id } = req.params;
